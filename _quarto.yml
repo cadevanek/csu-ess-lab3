@@ -1,0 +1,10 @@
+website:
+  site-url: "https://<your-github-username>.github.io/<your-repo-name>"
+  title: "<Your Website Title>"
+  navbar:
+    right:
+      - href: index.html
+        text: Home
+project:
+  type: website
+  output-dir: docs
