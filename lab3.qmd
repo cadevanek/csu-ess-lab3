@@ -1,0 +1,282 @@
+---
+title: "lab3"
+format: html
+---
+
+remotes::install_github("lter/lterdatasampler")
+```{r}
+install.packages("tidyverse")
+install.packages("flextable")
+install.packages("zoo")
+install.packages("dplyr")
+install.packages("maps")
+remotes::install_github("lter/lterdatasampler")
+library(tidyverse)
+library(flextable)
+library(zoo)
+library(dplyr)
+library(readr)
+```
+```{r}
+
+
+# Q1
+
+url <- "https://raw.githubusercontent.com/nytimes/covid-19-data/master/us-counties.csv"
+
+covid_data <- read_csv(url)
+
+my.date <- as.Date("2022-02-01")
+my.state <- "Colorado"
+
+colorado_data <- covid_data %>%
+  filter(state == "Colorado")
+#Having open data is extremely important towards public health and safety initiatives, as well as large-scale problems like climate change. Every bit of data is a piece of information on how trends emerge in the systems that govern things like health and climate. And even if data isn't explicity useful on first glance, it could be useful for training large models that require a huge amount of data. When we lose backups for data like this, we lose tools that let us respond to dangers.
+
+```
+```{r}
+#Q2
+
+new_cases_on_date <- colorado_daily %>%
+  filter(date == my.date) %>%
+  arrange(desc(new_cases)) %>%
+  head(5) %>%
+ 
+
+print(new_cases_on_date)
+
+cumulative_cases <- colorado_data %>%
+  group_by(county) %>%
+  arrange(date) %>%
+  mutate(cumulative_cases = cumsum(cases)) %>%
+  ungroup()
+
+colorado_daily <- colorado_data %>%
+  group_by(county) %>%
+  arrange(date) %>%
+  mutate(
+    new_cases = cases - lag(cases, default = 0),
+    new_deaths = deaths - lag(deaths, default = 0)
+  ) %>%
+  ungroup()
+
+cumulative_cases_on_date <- cumulative_cases %>%
+  filter(date == my.date) %>%
+  arrange(desc(cumulative_cases)) %>%
+  head(5) %>%
+  
+print(cumulative_cases_on_date)
+
+
+```
+```{r}
+#Q3
+
+pop_url <- 'https://www2.census.gov/programs-surveys/popest/datasets/2020-2023/counties/totals/co-est2023-alldata.csv'
+population_data <- read_csv(pop_url)
+
+population_data <- population_data %>%
+  mutate(
+    STATE = as.numeric(STATE),
+    COUNTY = as.numeric(COUNTY),
+    STATE = sprintf("%02d", STATE),
+    COUNTY = sprintf("%03d", COUNTY),
+    FIPS = paste0(STATE, COUNTY)
+  ) %>%
+  filter(COUNTY != "000") %>%
+  select(FIPS, contains("NAME"), contains("2021"))
+print(names(population_data))
+print(dim(population_data))
+print(nrow(population_data))
+str(population_data)
+glimpse(population_data)
+
+
+range(population_data$POPESTIMATE2021)
+
+
+covid_with_pop <- colorado_daily %>%
+  left_join(population_data, by = c("fips" = "FIPS")) %>%
+  left_join(cumulative_cases, by = c("date", "county", "state", "fips"))
+
+covid_with_pop <- colorado_daily %>%
+  left_join(population_data, by = c("fips" = "FIPS")) %>%
+  left_join(cumulative_cases, by = c("date", "county", "state", "fips")) %>%
+  mutate(
+    per_capita_cumulative_cases = cumulative_cases / POPESTIMATE2021,
+    per_capita_new_cases = new_cases / POPESTIMATE2021,
+    per_capita_new_deaths = new_deaths / POPESTIMATE2021
+  )
+date_2021 <- as.Date("2021-01-01")
+
+top_cumulative_per_capita <- covid_with_pop %>%
+  filter(date == date_2021) %>%
+  arrange(desc(per_capita_cumulative_cases)) %>%
+  head(5) %>%
+  select(county, date, per_capita_cumulative_cases)
+
+print(top_cumulative_per_capita)
+
+top_new_per_capita <- covid_with_pop %>%
+  filter(date == date_2021) %>%
+  arrange(desc(per_capita_new_cases)) %>%
+  head(5) %>%
+  select(county, date, per_capita_new_cases)
+
+print(top_new_per_capita)
+# The data from the census website has many more columns, and contains things like birth/death rates, along with population estimates and changes, among other things.
+
+```
+```{r}
+#Q4
+
+covid_with_pop <- colorado_daily %>%
+  left_join(population_data, by = c("fips" = "FIPS")) %>%
+  left_join(cumulative_cases, by = c("date", "county", "state", "fips")) %>%
+  mutate(
+    per_capita_cumulative_cases = cumulative_cases / POPESTIMATE2021,
+    per_capita_new_cases = new_cases / POPESTIMATE2021,
+    per_capita_new_deaths = new_deaths / POPESTIMATE2021
+  )
+
+
+last_14_days <- seq(max(covid_with_pop$date) - 13, max(covid_with_pop$date), by = "day")
+
+cases_last_14 <- covid_with_pop %>%
+  filter(date %in% last_14_days) %>%
+  group_by(county) %>%
+  summarize(total_new_14_days = sum(new_cases, na.rm = TRUE),
+            population = mean(POPESTIMATE2021, na.rm=TRUE)) %>%
+  mutate(cases_per_100k = (total_new_14_days / population) * 100000)
+
+top_5_14_days <- cases_last_14 %>%
+  arrange(desc(cases_per_100k)) %>%
+  head(5)
+
+print(top_5_14_days)
+
+watch_list <- cases_last_14 %>%
+  filter(cases_per_100k > 100)
+
+print(paste("Number of counties on watch list:", nrow(watch_list)))
+```
+```{r}
+# Q5: Death Toll
+
+deaths_2021 <- covid_with_pop %>%
+  filter(year(date) == 2021) %>%
+  group_by(county) %>%
+  summarize(total_covid_deaths_2021 = sum(new_deaths, na.rm = TRUE),
+            population = mean(POPESTIMATE2021, na.rm=TRUE))
+
+
+deaths_2021 <- deaths_2021 %>%
+  mutate(covid_death_ratio = total_covid_deaths_2021 / population)
+
+high_death_ratio <- deaths_2021 %>%
+  filter(covid_death_ratio >= 0.20)
+
+ggplot(high_death_ratio, aes(x = reorder(county, covid_death_ratio), y = covid_death_ratio)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(title = "Counties with COVID Death Ratio >= 20%",
+       x = "County",
+       y = "COVID Death Ratio (COVID Deaths / Population)") +
+  theme_minimal()
+#I am not sure what I did wrong here, but it seems like a death rate of >= 20% would be extremely high. I am not sure if there is anything like that in our dataset currently.
+```
+```{r}
+# Q6: Multi-state
+
+states <- c("New York", "Colorado", "Alabama", "Ohio")
+
+
+state_data <- covid_data %>%
+  filter(state %in% states) %>%
+  group_by(state, date) %>%
+  summarize(cases = sum(cases, na.rm = TRUE), .groups = "drop") %>%
+  arrange(date) %>% # Ensure data is ordered by date within each state
+  mutate(new_cases = cases - lag(cases, default = 0)) %>%
+  group_by(state) %>%
+  mutate(rolling_avg = rollmean(new_cases, k = 7, fill = NA, align = "right")) %>%
+  ungroup()
+
+
+ggplot(state_data, aes(x = date, y = new_cases)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  geom_line(aes(y = rolling_avg), color = "red", size = 1) +
+  facet_wrap(~state, scales = "free_y") +
+  labs(title = "Daily New COVID-19 Cases and 7-Day Rolling Average",
+       x = "Date",
+       y = "New Cases") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+state_pop <- read_csv(pop_url) %>%
+  filter(STNAME %in% states) %>%
+  mutate(POPESTIMATE2021 = as.numeric(POPESTIMATE2021)) %>%
+  select(STNAME, POPESTIMATE2021)
+
+
+state_data_pop <- state_data %>%
+  left_join(state_pop, by = c("state" = "STNAME")) %>%
+  mutate(new_cases_per_capita = new_cases / POPESTIMATE2021) %>%
+  group_by(state) %>%
+  mutate(rolling_avg_per_capita = rollmean(new_cases_per_capita, k = 7, fill = NA, align = "right")) %>%
+  ungroup()
+
+
+ggplot(state_data_pop, aes(x = date, y = rolling_avg_per_capita, color = state)) +
+  geom_line(size = 1) +
+  labs(title = "7-Day Rolling Average of New COVID-19 Cases Per Capita",
+       x = "Date",
+       y = "New Cases Per Capita") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+#It seems like the scaling has given us a better representation of covid rates. It would make sense that a dense city like New York would have much higher rates than the others shown, which have less dense cities.
+```
+```{r}
+
+# Q7
+county_centroids_url <- "https://raw.githubusercontent.com/mikejohnson51/csu-ess-330/refs/heads/main/resources/county-centroids.csv"
+county_centroids <- read_csv(county_centroids_url)
+
+covid_with_loc <- covid_data %>%
+  left_join(county_centroids, by = "fips")
+
+valid_dates <- covid_with_loc %>%
+  group_by(date) %>%
+  summarize(has_location = any(!is.na(LON))) %>% # Corrected to LON
+  filter(has_location) %>%
+  pull(date)
+
+covid_with_loc <- covid_with_loc %>%
+  filter(date %in% valid_dates) %>%
+  group_by(date) %>%
+  mutate(
+    weighted_lon = sum(LON * cases, na.rm = TRUE) / sum(cases, na.rm = TRUE), 
+    weighted_lat = sum(LAT * cases, na.rm = TRUE) / sum(cases, na.rm = TRUE),
+    total_cases = sum(cases, na.rm = TRUE),
+    month = format(date, "%m")
+  ) %>%
+  ungroup() %>%
+  distinct(date, .keep_all = TRUE) 
+ggplot(covid_with_loc, aes(x = weighted_lon, y = weighted_lat, color = month, size = total_cases)) + # Corrected to weighted_lon
+  borders("state", fill = "gray90", colour = "white") +
+  geom_point(alpha = 0.7) +
+  labs(title = "Weighted Mean Center of COVID-19 Outbreak in the USA",
+       x = "Longitude",
+       y = "Latitude",
+       color = "Month",
+       size = "Total Cases") +
+  theme_minimal() +
+  coord_quickmap()
+
+# While it seems like my mapping has some issues, it seems to me that movement started around the midwest, and really started to pick up as it moved east. This is somewhat at odds with what I heard, that the epicenter in the USA was new york (which adds up with our previous analysis.)
+
+
+
+```
+```{r}
+#Q8
+```
